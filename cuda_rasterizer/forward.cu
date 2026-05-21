@@ -262,6 +262,8 @@ renderCUDA(
 	float focal_x, float focal_y,
 	const float2* __restrict__ points_xy_image,
 	const float* __restrict__ features,
+	const float* __restrict__ colors2,
+	const float* __restrict__ cut_normals,
 	const float* __restrict__ transMats,
 	const float* __restrict__ depths,
 	const float4* __restrict__ normal_opacity,
@@ -412,10 +414,30 @@ renderCUDA(
 			// Render normal map
 			for (int ch=0; ch<3; ch++) N[ch] += normal[ch] * w;
 #endif
+			int global_id = collected_id[j];
+			
+			// 1. 提取当前高斯的切线法向量 (2D)
+			float2 cut_n = { cut_normals[global_id * 2 + 0], cut_normals[global_id * 2 + 1] };
+			
+			// 2. 计算当前像素(相对于高斯中心) 到切线的有向距离
+			// d.x 和 d.y 刚好是中心到当前像素的向量，所以直接点乘法向量！
+			float d_line = cut_n.x * d.x + cut_n.y * d.y; 
+			
+			// 3. 计算 Sigmoid 权重 W (k 控制边缘锐利度)
+			float k_sharpness = 10.0f; // 你可以在 Python 端训练好后动态调整它
+			float W_sig = 1.0f / (1.0f + expf(-k_sharpness * d_line));
 
 			// Eq. (3) from 3D Gaussian splatting paper.
-			for (int ch = 0; ch < CHANNELS; ch++)
-				C[ch] += features[collected_id[j] * CHANNELS + ch] * w;
+			// 4. 计算混合颜色并累加
+			for (int ch = 0; ch < CHANNELS; ch++) {
+				float c1_val = features[global_id * CHANNELS + ch];
+				float c2_val = colors2[global_id * CHANNELS + ch];
+				
+				// 如果外部把 c2_val 设置为等于 c1_val，这里等效于纯色全高斯！
+				float mixed_color = W_sig * c1_val + (1.0f - W_sig) * c2_val;
+				
+				C[ch] += mixed_color * w;
+			}
 			T = test_T;
 
 			// Keep track of last range entry to update this
@@ -455,6 +477,8 @@ void FORWARD::render(
 	float focal_x, float focal_y,
 	const float2* means2D,
 	const float* colors,
+	const float* colors2,
+	const float* cut_normals,
 	const float* transMats,
 	const float* depths,
 	const float4* normal_opacity,
@@ -471,6 +495,8 @@ void FORWARD::render(
 		focal_x, focal_y,
 		means2D,
 		colors,
+		colors2,
+		cut_normals,
 		transMats,
 		depths,
 		normal_opacity,
