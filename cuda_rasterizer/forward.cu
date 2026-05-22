@@ -424,7 +424,7 @@ renderCUDA(
 			float d_line = cut_n.x * d.x + cut_n.y * d.y; 
 			
 			// 3. 计算 Sigmoid 权重 W (k 控制边缘锐利度)
-			float k_sharpness = 10.0f; // 你可以在 Python 端训练好后动态调整它
+			float k_sharpness = 0.001f; // 你可以在 Python 端训练好后动态调整它
 			float W_sig = 1.0f / (1.0f + expf(-k_sharpness * d_line));
 
 			// Eq. (3) from 3D Gaussian splatting paper.

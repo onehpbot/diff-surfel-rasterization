@@ -328,9 +328,10 @@ renderCUDA(
 			// ==========================================================
 			float2 cut_n = { cut_normals[global_id * 2 + 0], cut_normals[global_id * 2 + 1] };
 			float d_line = cut_n.x * d.x + cut_n.y * d.y;
-			float k_sharpness = 10.0f;
+			float k_sharpness = 0.001f;
 			float W_sig = 1.0f / (1.0f + expf(-k_sharpness * d_line));
-			float W_grad = k_sharpness * W_sig * (1.0f - W_sig); // d(W)/d(d_line)
+			// float W_grad = k_sharpness * W_sig * (1.0f - W_sig); // d(W)/d(d_line)
+			float W_grad = 0.01f;
 			float dL_dW = 0.0f;
 
 			for (int ch = 0; ch < C; ch++)
@@ -346,6 +347,8 @@ renderCUDA(
 				const float dL_dchannel = dL_dpixel[ch];
 				dL_dalpha += (mixed_c - accum_rec[ch]) * dL_dchannel;
 
+				// float forced_grad = dL_dpixels[ch]; 
+				// atomicAdd(&(dL_dcut_normals[global_id * 2 + 0]), forced_grad * 0.1f);
 				// 1. 反传到两种颜色 c1 和 c2 上
 				float dL_dmixed = dchannel_dcolor * dL_dchannel;
 				atomicAdd(&(dL_dcolors[global_id * C + ch]), dL_dmixed * W_sig);
@@ -353,18 +356,22 @@ renderCUDA(
 				
 				// 2. 收集权重 W 的梯度
 				dL_dW += dL_dmixed * (c1 - c2);
+				if (global_id == 0 && pix_id % 1000 == 0) { 
+					printf("DEBUG: ch=%d, c1=%f, c2=%f, dL_dmixed=%f, dL_dW_acc=%f\n", 
+						ch, c1, c2, dL_dmixed, dL_dmixed * (c1 - c2));
+				}
 			}
-
 			// 3. 把 W 的梯度反传给 切线法向量
 			float dL_ddline = dL_dW * W_grad;
-			atomicAdd(&(dL_dcut_normals[global_id * 2 + 0]), dL_ddline * d.x);
-			atomicAdd(&(dL_dcut_normals[global_id * 2 + 1]), dL_ddline * d.y);
+			
+			atomicAdd(&(dL_dcut_normals[global_id * 2 + 0]), dL_ddline * d.x );
+			atomicAdd(&(dL_dcut_normals[global_id * 2 + 1]), dL_ddline * d.y );
 			
 			// 4. ✨ 把 W 的梯度顺着 d 反传给高斯 2D 中心位置 (mean2D)
 			// 因为 d_line = cut_n.x * d.x + cut_n.y * d.y
 			// 且 d.x = xy.x - pixf.x (xy是高斯中心投影)，所以 dL_d(xy.x) = dL_ddline * cut_n.x
-			atomicAdd(&(dL_dmean2D[global_id].x), dL_ddline * cut_n.x);
-			atomicAdd(&(dL_dmean2D[global_id].y), dL_ddline * cut_n.y);
+			// atomicAdd(&(dL_dmean2D[global_id].x), dL_ddline * cut_n.x);
+			// atomicAdd(&(dL_dmean2D[global_id].y), dL_ddline * cut_n.y);
 			// ==========================================================
 
 			float dL_dz = 0.0f;
